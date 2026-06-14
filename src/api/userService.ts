@@ -1,5 +1,5 @@
 import api from './axios';
-import type { UserWithWeight, User, Weight } from '../types';
+import type { UserWithWeight, User} from '../types';
 
 export interface Weight {
   id: number;
