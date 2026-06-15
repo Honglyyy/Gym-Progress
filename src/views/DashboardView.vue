@@ -17,6 +17,14 @@ const reps = ref<number | null>(null);
 const sessionDate = ref(new Date().toISOString().slice(0, 10));
 const expandedSessionIds = ref<number[]>([]);
 
+const editingSetId = ref<number | null>(null);
+const editingWeight = ref<number | null>(null);
+const editingReps = ref<number | null>(null);
+
+const editingSessionId = ref<number | null>(null);
+const editingSessionName = ref('');
+const editingSessionDate = ref('');
+
 onMounted(() => {
   userStore.fetchUsers();
   splitStore.fetchSplits();
@@ -66,6 +74,59 @@ const handleAddSet = async () => {
 const startWorkout = async () => {
   if (selectedSplitId.value === null || !selectedSession.value) return;
   await workoutStore.startSession(selectedSplitId.value, selectedSession.value.sessionName, sessionDate.value);
+};
+
+const handleEditSet = (set: any) => {
+  editingSetId.value = set.id;
+  editingWeight.value = parseFloat(set.weight);
+  editingReps.value = parseInt(set.reps);
+};
+
+const handleEditSession = (session: WorkoutSession) => {
+  editingSessionId.value = session.id;
+  editingSessionName.value = session.sessionName;
+  editingSessionDate.value = session.sessionDate;
+};
+
+const handleUpdateSession = async () => {
+  if (editingSessionId.value && editingSessionName.value && editingSessionDate.value) {
+    const session = workoutStore.sessions.find(s => s.id === editingSessionId.value);
+    if (session) {
+      await workoutStore.updateWorkoutSession(editingSessionId.value, session.splitId, editingSessionName.value, editingSessionDate.value);
+      editingSessionId.value = null;
+    }
+  }
+};
+
+const cancelEditSession = () => {
+  editingSessionId.value = null;
+};
+
+const handleUpdateSet = async (sessionId: number, exerciseId: number) => {
+  if (editingSetId.value && editingWeight.value !== null && editingReps.value !== null) {
+    await workoutStore.updateSet(editingSetId.value, editingWeight.value, editingReps.value, exerciseId, sessionId);
+    editingSetId.value = null;
+    editingWeight.value = null;
+    editingReps.value = null;
+  }
+};
+
+const handleDeleteSet = async (setId: number, sessionId: number) => {
+  if (confirm('Are you sure you want to delete this set?')) {
+    await workoutStore.deleteSet(setId, sessionId);
+  }
+};
+
+const handleDeleteSession = async (sessionId: number) => {
+  if (confirm('Are you sure you want to delete this entire workout session?')) {
+    await workoutStore.deleteWorkoutSession(sessionId);
+  }
+};
+
+const cancelEditSet = () => {
+  editingSetId.value = null;
+  editingWeight.value = null;
+  editingReps.value = null;
 };
 </script>
 
@@ -144,9 +205,17 @@ const startWorkout = async () => {
 
       <section v-else class="panel active-session">
         <div class="section-title">
-          <div>
+          <div v-if="editingSessionId === workoutStore.currentSession.id" class="session-edit-header">
+            <input v-model="editingSessionName" class="edit-session-name" />
+            <input v-model="editingSessionDate" type="date" class="edit-session-date" />
+            <div class="edit-actions">
+              <button @click="handleUpdateSession" class="save-session">Save</button>
+              <button @click="cancelEditSession" class="cancel-session">Cancel</button>
+            </div>
+          </div>
+          <div v-else @click="handleEditSession(workoutStore.currentSession)">
             <p class="eyebrow">Active Session</p>
-            <h2>{{ workoutStore.currentSession.sessionName }}</h2>
+            <h2 class="editable-title">{{ workoutStore.currentSession.sessionName }} ✎</h2>
           </div>
           <div class="session-meta">
             <span>{{ workoutStore.currentSession.sessionDate }}</span>
@@ -192,10 +261,20 @@ const startWorkout = async () => {
             </div>
             <div class="set-chips">
               <span v-if="entry.sets.length === 0" class="no-sets">No sets logged</span>
-              <span v-for="(set, index) in entry.sets" :key="set.id" class="set-chip">
-                <small>{{ index + 1 }}</small>
-                {{ set.weight }}<small>kg</small> x {{ set.reps }}
-              </span>
+              <div v-for="(set, index) in entry.sets" :key="set.id" class="set-chip-container">
+                <div v-if="editingSetId === set.id" class="set-edit-form">
+                  <input v-model.number="editingWeight" type="number" step="0.5" />
+                  <span>x</span>
+                  <input v-model.number="editingReps" type="number" />
+                  <button @click="handleUpdateSet(workoutStore.currentSession!.id, entry.exercise.id)" class="save-set">✓</button>
+                  <button @click="cancelEditSet" class="cancel-set">×</button>
+                </div>
+                <div v-else class="set-chip" @click="handleEditSet(set)">
+                  <small>{{ index + 1 }}</small>
+                  {{ set.weight }}<small>kg</small> x {{ set.reps }}
+                  <button class="delete-set-btn" @click.stop="handleDeleteSet(set.id, workoutStore.currentSession!.id)">×</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -210,16 +289,28 @@ const startWorkout = async () => {
         <div v-if="workoutStore.loading">Loading workouts...</div>
         <div v-else class="history-list">
           <article v-for="session in workoutStore.sessions" :key="session.id" class="history-card">
-            <button class="history-toggle" @click="toggleSession(session.id)">
-              <div class="history-main">
-                <strong>{{ session.sessionName }}</strong>
-                <small>{{ session.sessionDate }}</small>
+            <div class="history-header">
+              <div v-if="editingSessionId === session.id" class="session-edit-header history-edit">
+                <input v-model="editingSessionName" />
+                <input v-model="editingSessionDate" type="date" />
+                <button @click="handleUpdateSession" class="save-set">✓</button>
+                <button @click="cancelEditSession" class="cancel-set">×</button>
               </div>
-              <div class="history-stats">
-                <span>{{ session.workoutSets.length }} sets</span>
-                <span class="chevron" :class="{ open: expandedSessionIds.includes(session.id) }">▼</span>
+              <button v-else class="history-toggle" @click="toggleSession(session.id)">
+                <div class="history-main">
+                  <strong>{{ session.sessionName }}</strong>
+                  <small>{{ session.sessionDate }}</small>
+                </div>
+                <div class="history-stats">
+                  <span>{{ session.workoutSets.length }} sets</span>
+                  <span class="chevron" :class="{ open: expandedSessionIds.includes(session.id) }">▼</span>
+                </div>
+              </button>
+              <div class="history-actions">
+                <button v-if="editingSessionId !== session.id" class="edit-session-btn" @click="handleEditSession(session)">✎</button>
+                <button class="delete-session-btn" @click="handleDeleteSession(session.id)">🗑</button>
               </div>
-            </button>
+            </div>
             <div v-if="expandedSessionIds.includes(session.id)" class="history-detail">
               <div v-for="entry in setsByExercise(session)" :key="entry.exercise.id" class="exercise-row">
                 <div class="exercise-info">
@@ -228,9 +319,19 @@ const startWorkout = async () => {
                 </div>
                 <div class="set-chips">
                   <span v-if="entry.sets.length === 0">No sets logged</span>
-                  <span v-for="set in entry.sets" :key="set.id" class="set-chip">
-                    {{ set.weight }}kg x {{ set.reps }}
-                  </span>
+                  <div v-for="set in entry.sets" :key="set.id" class="set-chip-container">
+                    <div v-if="editingSetId === set.id" class="set-edit-form">
+                      <input v-model.number="editingWeight" type="number" step="0.5" />
+                      <span>x</span>
+                      <input v-model.number="editingReps" type="number" />
+                      <button @click="handleUpdateSet(session.id, entry.exercise.id)" class="save-set">✓</button>
+                      <button @click="cancelEditSet" class="cancel-set">×</button>
+                    </div>
+                    <div v-else class="set-chip" @click="handleEditSet(set)">
+                      {{ set.weight }}kg x {{ set.reps }}
+                      <button class="delete-set-btn" @click.stop="handleDeleteSet(set.id, session.id)">×</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -404,6 +505,76 @@ const startWorkout = async () => {
   flex-direction: column;
 }
 
+.session-edit-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.session-edit-header input {
+  padding: 0.4rem;
+  font-size: 0.9rem;
+  background: #0d1210;
+  border: 1px solid #31433b;
+  color: white;
+  border-radius: 4px;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.save-session, .cancel-session {
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.save-session { background: #2fb174; color: #08100c; border: none; }
+.cancel-session { background: #1a2420; color: #9ba9a3; border: 1px solid #31433b; }
+
+.editable-title {
+  cursor: pointer;
+}
+
+.editable-title:hover {
+  color: #2fb174;
+}
+
+.history-edit {
+  flex-direction: row;
+  padding: 0.5rem;
+  flex-grow: 1;
+}
+
+.history-edit input {
+  flex-grow: 1;
+}
+
+.history-actions {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.edit-session-btn {
+  background: none;
+  border: none;
+  color: #9ba9a3;
+  cursor: pointer;
+  padding: 0.5rem;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.edit-session-btn:hover {
+  opacity: 1;
+  color: #2fb174;
+}
+
 .add-set-card {
   background: #0d1210;
   border: 1px solid #26352f;
@@ -494,6 +665,40 @@ input, select {
   gap: 0.5rem;
 }
 
+.set-chip-container {
+  display: flex;
+  align-items: center;
+}
+
+.set-edit-form {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: #1e3129;
+  padding: 0.2rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #2fb174;
+}
+
+.set-edit-form input {
+  width: 45px;
+  padding: 0.2rem;
+  font-size: 0.85rem;
+  background: #0d1210;
+  text-align: center;
+}
+
+.save-set, .cancel-set {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-weight: bold;
+  padding: 0.2rem;
+}
+
+.save-set { color: #2fb174; }
+.cancel-set { color: #ff4444; }
+
 .set-chip {
   padding: 0.4rem 0.75rem;
   border-radius: 8px;
@@ -504,6 +709,25 @@ input, select {
   display: flex;
   align-items: center;
   gap: 0.3rem;
+  cursor: pointer;
+  position: relative;
+  padding-right: 1.5rem;
+}
+
+.delete-set-btn {
+  position: absolute;
+  right: 0.3rem;
+  background: none;
+  border: none;
+  color: #ff4444;
+  font-size: 0.8rem;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+
+.set-chip:hover .delete-set-btn {
+  opacity: 1;
 }
 
 .set-chip small {
@@ -530,8 +754,15 @@ input, select {
   background: #0d1210;
 }
 
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-right: 0.75rem;
+}
+
 .history-toggle {
-  width: 100%;
+  flex-grow: 1;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -541,6 +772,20 @@ input, select {
   color: white;
   cursor: pointer;
   text-align: left;
+}
+
+.delete-session-btn {
+  background: none;
+  border: none;
+  color: #ff4444;
+  cursor: pointer;
+  padding: 0.5rem;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.delete-session-btn:hover {
+  opacity: 1;
 }
 
 .history-main {

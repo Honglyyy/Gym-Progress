@@ -27,5 +27,13 @@ export const useSplitStore = defineStore('split', () => {
     splits.value = splits.value.filter(s => s.id !== id);
   }
 
-  return { splits, loading, fetchSplits, addSplit, deleteSplit };
+  async function updateSplit(id: number, name: string, sessions: { sessionName: string, exerciseIds: number[] }[]) {
+    const response = await splitService.updateSplit(id, name, sessions);
+    const index = splits.value.findIndex(s => s.id === id);
+    if (index !== -1) {
+      splits.value[index] = response.data;
+    }
+  }
+
+  return { splits, loading, fetchSplits, addSplit, deleteSplit, updateSplit };
 });

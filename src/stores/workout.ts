@@ -43,5 +43,62 @@ export const useWorkoutStore = defineStore('workout', () => {
     return response.data;
   }
 
-  return { sessions, currentSession, loading, fetchSessions, startSession, addSet };
+  async function updateSet(id: number, weight: number, reps: number, exerciseId: number, workoutSessionId: number) {
+    const response = await workoutService.updateWorkoutSet(id, {
+      weight: weight.toString(),
+      reps: reps.toString(),
+      exerciseId,
+      workoutSessionId,
+    });
+    if (currentSession.value && currentSession.value.id === workoutSessionId) {
+      currentSession.value.workoutSets = currentSession.value.workoutSets.map(s => s.id === id ? response.data : s);
+    }
+    sessions.value = sessions.value.map(session => {
+      if (session.id === workoutSessionId) {
+        return {
+          ...session,
+          workoutSets: session.workoutSets.map(s => s.id === id ? response.data : s)
+        };
+      }
+      return session;
+    });
+  }
+
+  async function deleteSet(id: number, workoutSessionId: number) {
+    await workoutService.deleteWorkoutSet(id);
+    if (currentSession.value && currentSession.value.id === workoutSessionId) {
+      currentSession.value.workoutSets = currentSession.value.workoutSets.filter(s => s.id !== id);
+    }
+    sessions.value = sessions.value.map(session => {
+      if (session.id === workoutSessionId) {
+        return {
+          ...session,
+          workoutSets: session.workoutSets.filter(s => s.id !== id)
+        };
+      }
+      return session;
+    });
+  }
+
+  async function updateWorkoutSession(id: number, splitId: number, sessionName: string, sessionDate: string) {
+    const response = await workoutService.updateWorkoutSession(id, splitId, sessionName, sessionDate);
+    if (currentSession.value && currentSession.value.id === id) {
+      currentSession.value = { ...currentSession.value, ...response.data };
+    }
+    sessions.value = sessions.value.map(s => s.id === id ? { ...s, ...response.data } : s);
+  }
+
+  async function deleteWorkoutSession(id: number) {
+    await workoutService.deleteWorkoutSession(id);
+    if (currentSession.value && currentSession.value.id === id) {
+      currentSession.value = null;
+    }
+    sessions.value = sessions.value.filter(s => s.id !== id);
+  }
+
+  return { 
+    sessions, currentSession, loading, 
+    fetchSessions, startSession, addSet, 
+    updateSet, deleteSet, updateWorkoutSession, deleteWorkoutSession 
+  };
 });

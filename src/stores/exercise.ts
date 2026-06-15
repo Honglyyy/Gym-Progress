@@ -23,5 +23,18 @@ export const useExerciseStore = defineStore('exercise', () => {
     return response.data;
   }
 
-  return { exercises, loading, fetchExercises, addExercise };
+  async function updateExercise(id: number, exerciseName: string, muscleGroupId?: number) {
+    const response = await exerciseService.updateExercise(id, exerciseName, muscleGroupId);
+    const index = exercises.value.findIndex(e => e.id === id);
+    if (index !== -1) {
+      exercises.value[index] = response.data;
+    }
+  }
+
+  async function deleteExercise(id: number) {
+    await exerciseService.deleteExercise(id);
+    exercises.value = exercises.value.filter(e => e.id !== id);
+  }
+
+  return { exercises, loading, fetchExercises, addExercise, updateExercise, deleteExercise };
 });

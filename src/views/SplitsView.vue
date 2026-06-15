@@ -11,7 +11,10 @@ const sessions = ref<{ sessionName: string; exerciseIds: number[] }[]>([
   { sessionName: '', exerciseIds: [] }
 ]);
 
+const editingSplitId = ref<number | null>(null);
+
 const showExerciseModal = ref(false);
+const editingExerciseId = ref<number | null>(null);
 const activeSessionIndex = ref<number | null>(null);
 const newExerciseName = ref('');
 const selectedMuscleGroupId = ref<number | null>(null);
@@ -36,26 +39,62 @@ const removeSessionRow = (index: number) => {
   sessions.value.splice(index, 1);
 };
 
-const openExerciseModal = (index: number) => {
+const openExerciseModal = (index: number | null = null, exercise: any = null) => {
   activeSessionIndex.value = index;
+  if (exercise) {
+    editingExerciseId.value = exercise.id;
+    newExerciseName.value = exercise.exerciseName;
+    const mg = muscleGroups.value.find(m => m.muscleGroups === exercise.muscleGroup);
+    selectedMuscleGroupId.value = mg ? mg.id : null;
+  } else {
+    editingExerciseId.value = null;
+    newExerciseName.value = '';
+    selectedMuscleGroupId.value = null;
+  }
   showExerciseModal.value = true;
 };
 
-const handleCreateExercise = async () => {
-  if (newExerciseName.value && selectedMuscleGroupId.value && activeSessionIndex.value !== null) {
-    const exercise = await exerciseStore.addExercise(newExerciseName.value, selectedMuscleGroupId.value);
-    sessions.value[activeSessionIndex.value].exerciseIds.push(exercise.id);
+const handleSaveExercise = async () => {
+  if (newExerciseName.value && selectedMuscleGroupId.value) {
+    if (editingExerciseId.value) {
+      await exerciseStore.updateExercise(editingExerciseId.value, newExerciseName.value, selectedMuscleGroupId.value);
+    } else {
+      const exercise = await exerciseStore.addExercise(newExerciseName.value, selectedMuscleGroupId.value);
+      if (activeSessionIndex.value !== null) {
+        sessions.value[activeSessionIndex.value].exerciseIds.push(exercise.id);
+      }
+    }
     newExerciseName.value = '';
     selectedMuscleGroupId.value = null;
     showExerciseModal.value = false;
+    editingExerciseId.value = null;
   }
+};
+
+const handleEditSplit = (split: any) => {
+  editingSplitId.value = split.id;
+  newSplitName.value = split.splitName;
+  sessions.value = split.sessions.map((s: any) => ({
+    sessionName: s.sessionName,
+    exerciseIds: s.exercises.map((e: any) => e.id)
+  }));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+const cancelEdit = () => {
+  editingSplitId.value = null;
+  newSplitName.value = '';
+  sessions.value = [{ sessionName: '', exerciseIds: [] }];
 };
 
 const handleAddSplit = async () => {
   if (newSplitName.value.trim() && sessions.value.every(s => s.sessionName.trim() && s.exerciseIds.length > 0)) {
-    await splitStore.addSplit(newSplitName.value, sessions.value);
-    newSplitName.value = '';
-    sessions.value = [{ sessionName: '', exerciseIds: [] }];
+    if (editingSplitId.value) {
+      await splitStore.updateSplit(editingSplitId.value, newSplitName.value, sessions.value);
+    } else {
+      await splitStore.addSplit(newSplitName.value, sessions.value);
+    }
+    cancelEdit();
   }
 };
 </script>
@@ -68,10 +107,11 @@ const handleAddSplit = async () => {
     </section>
 
     <div class="split-layout">
-      <!-- Create Split Section -->
+      <!-- Create/Edit Split Section -->
       <section class="panel create-panel">
         <div class="panel-header">
-          <h2>Create New Split</h2>
+          <h2>{{ editingSplitId ? 'Edit Split' : 'Create New Split' }}</h2>
+          <button v-if="editingSplitId" class="cancel-link" @click="cancelEdit">Cancel Editing</button>
         </div>
         
         <div class="form-body">
@@ -102,10 +142,13 @@ const handleAddSplit = async () => {
                   <button class="inline-add-btn" @click="openExerciseModal(index)">+ New Exercise</button>
                 </div>
                 <div class="exercise-grid">
-                  <label v-for="ex in exerciseStore.exercises" :key="ex.id" class="exercise-chip" :class="{ selected: session.exerciseIds.includes(ex.id) }">
-                    <input type="checkbox" :value="ex.id" v-model="session.exerciseIds" />
-                    <span>{{ ex.exerciseName }}</span>
-                  </label>
+                  <div v-for="ex in exerciseStore.exercises" :key="ex.id" class="exercise-chip-wrapper">
+                    <label class="exercise-chip" :class="{ selected: session.exerciseIds.includes(ex.id) }">
+                      <input type="checkbox" :value="ex.id" v-model="session.exerciseIds" />
+                      <span>{{ ex.exerciseName }}</span>
+                    </label>
+                    <button class="edit-ex-btn" @click.stop="openExerciseModal(null, ex)">✎</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -116,7 +159,7 @@ const handleAddSplit = async () => {
             @click="handleAddSplit" 
             :disabled="!newSplitName || sessions.some(s => !s.sessionName || s.exerciseIds.length === 0)"
           >
-            Create Split Program
+            {{ editingSplitId ? 'Update Split Program' : 'Create Split Program' }}
           </button>
         </div>
       </section>
@@ -130,10 +173,13 @@ const handleAddSplit = async () => {
 
         <div v-if="splitStore.loading" class="loading">Loading programs...</div>
         <div v-else class="split-list">
-          <div v-for="split in splitStore.splits" :key="split.id" class="split-card">
+          <div v-for="split in splitStore.splits" :key="split.id" class="split-card" :class="{ editing: editingSplitId === split.id }">
             <div class="card-header">
               <h3>{{ split.splitName }}</h3>
-              <button class="icon-btn delete" @click="splitStore.deleteSplit(split.id)" title="Delete Split">🗑</button>
+              <div class="card-actions">
+                <button class="icon-btn edit" @click="handleEditSplit(split)" title="Edit Split">✎</button>
+                <button class="icon-btn delete" @click="splitStore.deleteSplit(split.id)" title="Delete Split">🗑</button>
+              </div>
             </div>
             
             <div class="sessions-preview">
@@ -150,7 +196,7 @@ const handleAddSplit = async () => {
     <!-- Exercise Modal -->
     <div v-if="showExerciseModal" class="modal-overlay" @click.self="showExerciseModal = false">
       <div class="modal">
-        <h3>Create New Exercise</h3>
+        <h3>{{ editingExerciseId ? 'Edit Exercise' : 'Create New Exercise' }}</h3>
         <div class="modal-form">
           <div class="input-group">
             <label>Exercise Name</label>
@@ -165,7 +211,9 @@ const handleAddSplit = async () => {
           </div>
           <div class="modal-actions">
             <button class="cancel-btn" @click="showExerciseModal = false">Cancel</button>
-            <button class="primary-action" @click="handleCreateExercise" :disabled="!newExerciseName || !selectedMuscleGroupId">Create & Add</button>
+            <button class="primary-action" @click="handleSaveExercise" :disabled="!newExerciseName || !selectedMuscleGroupId">
+              {{ editingExerciseId ? 'Update' : 'Create & Add' }}
+            </button>
           </div>
         </div>
       </div>
@@ -219,6 +267,15 @@ const handleAddSplit = async () => {
   margin: 0;
   font-size: 1.2rem;
   color: #c9d8d0;
+}
+
+.cancel-link {
+  background: none;
+  border: none;
+  color: #ff4444;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .form-body {
@@ -340,15 +397,39 @@ input:focus, select:focus {
   gap: 0.5rem;
 }
 
+.exercise-chip-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .exercise-chip {
   position: relative;
-  padding: 0.4rem 0.8rem;
+  padding: 0.4rem 2rem 0.4rem 0.8rem;
   background: #121816;
   border: 1px solid #31433b;
   border-radius: 20px;
   font-size: 0.85rem;
   cursor: pointer;
   transition: all 0.2s;
+}
+
+.edit-ex-btn {
+  position: absolute;
+  right: 0.5rem;
+  background: none;
+  border: none;
+  color: #9ba9a3;
+  font-size: 0.75rem;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  padding: 0.2rem;
+}
+
+.edit-ex-btn:hover {
+  opacity: 1;
+  color: #2fb174;
 }
 
 .exercise-chip input {
@@ -395,6 +476,12 @@ input:focus, select:focus {
   border: 1px solid #26352f;
   border-radius: 12px;
   padding: 1rem;
+  transition: border-color 0.2s;
+}
+
+.split-card.editing {
+  border-color: #2fb174;
+  background: #16221d;
 }
 
 .card-header {
@@ -402,6 +489,11 @@ input:focus, select:focus {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.75rem;
+}
+
+.card-actions {
+  display: flex;
+  gap: 0.25rem;
 }
 
 .card-header h3 {

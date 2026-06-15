@@ -17,4 +17,10 @@ export const workoutService = {
   addWorkoutSet(workoutSet: WorkoutSetRequest) {
     return api.post<WorkoutSet>('/exercises/sets', workoutSet);
   },
+  updateWorkoutSet(id: number, workoutSet: WorkoutSetRequest) {
+    return api.put<WorkoutSet>(`/exercises/sets/${id}`, workoutSet);
+  },
+  deleteWorkoutSet(id: number) {
+    return api.delete(`/exercises/sets/${id}`);
+  },
 };

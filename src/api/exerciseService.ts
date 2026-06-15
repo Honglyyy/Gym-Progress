@@ -11,6 +11,9 @@ export const exerciseService = {
   createExercise(exerciseName: string, muscleGroupId?: number) {
     return api.post<Exercise>('/exercises', { exerciseName, muscleGroupId });
   },
+  updateExercise(id: number, exerciseName: string, muscleGroupId?: number) {
+    return api.put<Exercise>(`/exercises/${id}`, { exerciseName, muscleGroupId });
+  },
   deleteExercise(id: number) {
     return api.delete(`/exercises/${id}`);
   },
