@@ -20,10 +20,13 @@ const expandedSessionIds = ref<number[]>([]);
 const editingSetId = ref<number | null>(null);
 const editingWeight = ref<number | null>(null);
 const editingReps = ref<number | null>(null);
+const editingExerciseId = ref<number | null>(null);
 
 const editingSessionId = ref<number | null>(null);
 const editingSessionName = ref('');
 const editingSessionDate = ref('');
+
+const addingSetToExercise = ref<{ sessionId: number; exerciseId: number } | null>(null);
 
 onMounted(() => {
   userStore.fetchUsers();
@@ -71,15 +74,50 @@ const handleAddSet = async () => {
   }
 };
 
+const handleAddSetInline = async (sessionId: number, exerciseId: number) => {
+  if (weight.value !== null && reps.value !== null) {
+    await workoutStore.addSet(weight.value, reps.value, exerciseId, sessionId);
+    weight.value = null;
+    reps.value = null;
+    addingSetToExercise.value = null;
+  }
+};
+
 const startWorkout = async () => {
   if (selectedSplitId.value === null || !selectedSession.value) return;
-  await workoutStore.startSession(selectedSplitId.value, selectedSession.value.sessionName, sessionDate.value);
+  await workoutStore.startSession(
+    selectedSplitId.value, 
+    selectedSession.value.sessionName, 
+    sessionDate.value,
+    selectedSession.value.exercises
+  );
+};
+
+const handleSaveSession = async () => {
+  if (confirm('Are you sure you want to save this session to the database?')) {
+    await workoutStore.saveSession();
+  }
+};
+
+const quickAddSet = (sessionId: number, exerciseId: number) => {
+  if (workoutStore.currentSession && sessionId === workoutStore.currentSession.id) {
+    selectedExerciseId.value = exerciseId;
+    weight.value = null;
+    reps.value = null;
+    const el = document.querySelector('.add-set-card');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  } else {
+    addingSetToExercise.value = { sessionId, exerciseId };
+    weight.value = null;
+    reps.value = null;
+  }
 };
 
 const handleEditSet = (set: any) => {
   editingSetId.value = set.id;
   editingWeight.value = parseFloat(set.weight);
   editingReps.value = parseInt(set.reps);
+  editingExerciseId.value = set.exerciseId;
 };
 
 const handleEditSession = (session: WorkoutSession) => {
@@ -102,12 +140,13 @@ const cancelEditSession = () => {
   editingSessionId.value = null;
 };
 
-const handleUpdateSet = async (sessionId: number, exerciseId: number) => {
-  if (editingSetId.value && editingWeight.value !== null && editingReps.value !== null) {
-    await workoutStore.updateSet(editingSetId.value, editingWeight.value, editingReps.value, exerciseId, sessionId);
+const handleUpdateSet = async (sessionId: number) => {
+  if (editingSetId.value && editingWeight.value !== null && editingReps.value !== null && editingExerciseId.value !== null) {
+    await workoutStore.updateSet(editingSetId.value, editingWeight.value, editingReps.value, editingExerciseId.value, sessionId);
     editingSetId.value = null;
     editingWeight.value = null;
     editingReps.value = null;
+    editingExerciseId.value = null;
   }
 };
 
@@ -127,6 +166,7 @@ const cancelEditSet = () => {
   editingSetId.value = null;
   editingWeight.value = null;
   editingReps.value = null;
+  editingExerciseId.value = null;
 };
 </script>
 
@@ -214,10 +254,11 @@ const cancelEditSet = () => {
             </div>
           </div>
           <div v-else @click="handleEditSession(workoutStore.currentSession)">
-            <p class="eyebrow">Active Session</p>
+            <p class="eyebrow">Active Session {{ workoutStore.isDraft ? '(Draft)' : '' }}</p>
             <h2 class="editable-title">{{ workoutStore.currentSession.sessionName }} ✎</h2>
           </div>
           <div class="session-meta">
+            <button v-if="workoutStore.isDraft" class="save-btn-top" @click="handleSaveSession">Save Session</button>
             <span>{{ workoutStore.currentSession.sessionDate }}</span>
             <strong>{{ workoutStore.currentSession.workoutSets.length }} sets</strong>
           </div>
@@ -257,17 +298,32 @@ const cancelEditSet = () => {
           <div v-for="entry in setsByExercise(workoutStore.currentSession)" :key="entry.exercise.id" class="exercise-row">
             <div class="exercise-info">
               <strong>{{ entry.exercise.exerciseName }}</strong>
-              <span>{{ entry.exercise.muscleGroup || 'No group' }}</span>
+              <div class="exercise-info-right">
+                <button v-if="entry.sets.length === 0" class="quick-add-btn" @click="quickAddSet(workoutStore.currentSession!.id, entry.exercise.id)">+ Add Set</button>
+                <span>{{ entry.exercise.muscleGroup || 'No group' }}</span>
+              </div>
             </div>
             <div class="set-chips">
-              <span v-if="entry.sets.length === 0" class="no-sets">No sets logged</span>
+              <div v-if="addingSetToExercise?.sessionId === workoutStore.currentSession!.id && addingSetToExercise?.exerciseId === entry.exercise.id" class="set-edit-form inline-add">
+                <input v-model.number="weight" type="number" step="0.5" placeholder="kg" />
+                <span>x</span>
+                <input v-model.number="reps" type="number" placeholder="reps" />
+                <button @click="handleAddSetInline(workoutStore.currentSession!.id, entry.exercise.id)" class="save-set">✓</button>
+                <button @click="addingSetToExercise = null" class="cancel-set">×</button>
+              </div>
+              <span v-else-if="entry.sets.length === 0" class="no-sets">No sets logged</span>
               <div v-for="(set, index) in entry.sets" :key="set.id" class="set-chip-container">
-                <div v-if="editingSetId === set.id" class="set-edit-form">
-                  <input v-model.number="editingWeight" type="number" step="0.5" />
-                  <span>x</span>
-                  <input v-model.number="editingReps" type="number" />
-                  <button @click="handleUpdateSet(workoutStore.currentSession!.id, entry.exercise.id)" class="save-set">✓</button>
-                  <button @click="cancelEditSet" class="cancel-set">×</button>
+                <div v-if="editingSetId === set.id" class="set-edit-form expanded">
+                  <select v-model="editingExerciseId" class="edit-set-exercise">
+                    <option v-for="ex in activeSplitExercises" :key="ex.id" :value="ex.id">{{ ex.exerciseName }}</option>
+                  </select>
+                  <div class="edit-inputs">
+                    <input v-model.number="editingWeight" type="number" step="0.5" />
+                    <span>x</span>
+                    <input v-model.number="editingReps" type="number" />
+                    <button @click="handleUpdateSet(workoutStore.currentSession!.id)" class="save-set">✓</button>
+                    <button @click="cancelEditSet" class="cancel-set">×</button>
+                  </div>
                 </div>
                 <div v-else class="set-chip" @click="handleEditSet(set)">
                   <small>{{ index + 1 }}</small>
@@ -315,17 +371,32 @@ const cancelEditSet = () => {
               <div v-for="entry in setsByExercise(session)" :key="entry.exercise.id" class="exercise-row">
                 <div class="exercise-info">
                   <strong>{{ entry.exercise.exerciseName }}</strong>
-                  <span>{{ entry.exercise.muscleGroup || 'No group' }}</span>
+                  <div class="exercise-info-right">
+                    <button v-if="entry.sets.length === 0" class="quick-add-btn" @click="quickAddSet(session.id, entry.exercise.id)">+ Add Set</button>
+                    <span>{{ entry.exercise.muscleGroup || 'No group' }}</span>
+                  </div>
                 </div>
                 <div class="set-chips">
-                  <span v-if="entry.sets.length === 0">No sets logged</span>
+                  <div v-if="addingSetToExercise?.sessionId === session.id && addingSetToExercise?.exerciseId === entry.exercise.id" class="set-edit-form inline-add">
+                    <input v-model.number="weight" type="number" step="0.5" placeholder="kg" />
+                    <span>x</span>
+                    <input v-model.number="reps" type="number" placeholder="reps" />
+                    <button @click="handleAddSetInline(session.id, entry.exercise.id)" class="save-set">✓</button>
+                    <button @click="addingSetToExercise = null" class="cancel-set">×</button>
+                  </div>
+                  <span v-else-if="entry.sets.length === 0">No sets logged</span>
                   <div v-for="set in entry.sets" :key="set.id" class="set-chip-container">
-                    <div v-if="editingSetId === set.id" class="set-edit-form">
-                      <input v-model.number="editingWeight" type="number" step="0.5" />
-                      <span>x</span>
-                      <input v-model.number="editingReps" type="number" />
-                      <button @click="handleUpdateSet(session.id, entry.exercise.id)" class="save-set">✓</button>
-                      <button @click="cancelEditSet" class="cancel-set">×</button>
+                    <div v-if="editingSetId === set.id" class="set-edit-form expanded">
+                      <select v-model="editingExerciseId" class="edit-set-exercise">
+                        <option v-for="ex in session.exercises" :key="ex.id" :value="ex.id">{{ ex.exerciseName }}</option>
+                      </select>
+                      <div class="edit-inputs">
+                        <input v-model.number="editingWeight" type="number" step="0.5" />
+                        <span>x</span>
+                        <input v-model.number="editingReps" type="number" />
+                        <button @click="handleUpdateSet(session.id)" class="save-set">✓</button>
+                        <button @click="cancelEditSet" class="cancel-set">×</button>
+                      </div>
                     </div>
                     <div v-else class="set-chip" @click="handleEditSet(set)">
                       {{ set.weight }}kg x {{ set.reps }}
@@ -344,6 +415,66 @@ const cancelEditSet = () => {
 </template>
 
 <style scoped>
+.save-btn-top {
+  background: #2fb174;
+  color: #08100c;
+  border: none;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-weight: 800;
+  font-size: 0.8rem;
+  cursor: pointer;
+  margin-bottom: 0.25rem;
+}
+
+.exercise-info-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.quick-add-btn {
+  background: rgba(47, 177, 116, 0.1);
+  color: #2fb174;
+  border: 1px dashed #2fb174;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.set-edit-form.expanded {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.edit-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.edit-set-exercise {
+  width: 100%;
+  padding: 0.2rem;
+  font-size: 0.8rem;
+  background: #0d1210;
+  border: 1px solid #31433b;
+  color: white;
+  border-radius: 4px;
+}
+
+.set-edit-form.inline-add {
+  border-style: dashed;
+  background: rgba(47, 177, 116, 0.05);
+}
+
+.set-edit-form.inline-add input {
+  width: 60px;
+}
 .dashboard {
   display: flex;
   flex-direction: column;
