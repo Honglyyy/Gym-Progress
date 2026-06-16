@@ -4,6 +4,7 @@ import { useUserStore } from '../stores/user';
 import { useSplitStore } from '../stores/split';
 import { useWorkoutStore } from '../stores/workout';
 import type { WorkoutSession } from '../types';
+import { exportToExcel, exportToPDF, filterSessions } from '../utils/exportUtils';
 
 const userStore = useUserStore();
 const splitStore = useSplitStore();
@@ -16,6 +17,25 @@ const weight = ref<number | null>(null);
 const reps = ref<number | null>(null);
 const sessionDate = ref(new Date().toISOString().slice(0, 10));
 const expandedSessionIds = ref<number[]>([]);
+
+const filterPeriod = ref<'day' | 'week' | 'month' | 'year' | 'all'>('all');
+const filterSessionName = ref('');
+
+const filteredSessions = computed(() => {
+  let result = filterSessions(workoutStore.sessions, filterPeriod.value);
+  if (filterSessionName.value) {
+    result = result.filter(s => s.sessionName.toLowerCase().includes(filterSessionName.value.toLowerCase()));
+  }
+  return result;
+});
+
+const handleExportExcel = () => {
+  exportToExcel(filteredSessions.value, `workout_history_${filterPeriod.value}.xlsx`);
+};
+
+const handleExportPDF = () => {
+  exportToPDF(filteredSessions.value, `workout_history_${filterPeriod.value}.pdf`);
+};
 
 const editingSetId = ref<number | null>(null);
 const editingWeight = ref<number | null>(null);
@@ -339,12 +359,26 @@ const cancelEditSet = () => {
       <section class="panel history">
         <div class="section-title">
           <h2>Recent History</h2>
-          <span>{{ workoutStore.sessions.length }} sessions</span>
+          <div class="history-controls">
+            <select v-model="filterPeriod" class="filter-select">
+              <option value="all">All Time</option>
+              <option value="day">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="year">This Year</option>
+            </select>
+            <input v-model="filterSessionName" placeholder="Search session..." class="filter-input" />
+            <div class="export-buttons">
+              <button @click="handleExportExcel" title="Export to Excel" class="export-btn excel">Excel</button>
+              <button @click="handleExportPDF" title="Export to PDF" class="export-btn pdf">PDF</button>
+            </div>
+          </div>
+          <span>{{ filteredSessions.length }} sessions</span>
         </div>
 
         <div v-if="workoutStore.loading">Loading workouts...</div>
         <div v-else class="history-list">
-          <article v-for="session in workoutStore.sessions" :key="session.id" class="history-card">
+          <article v-for="session in filteredSessions" :key="session.id" class="history-card">
             <div class="history-header">
               <div v-if="editingSessionId === session.id" class="session-edit-header history-edit">
                 <input v-model="editingSessionName" />
@@ -415,6 +449,52 @@ const cancelEditSet = () => {
 </template>
 
 <style scoped>
+.history-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.filter-select, .filter-input {
+  background: #0d1210;
+  border: 1px solid #31433b;
+  color: white;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.filter-input {
+  width: 120px;
+}
+
+.export-buttons {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.export-btn {
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.export-btn.excel {
+  background: rgba(47, 177, 116, 0.1);
+  color: #2fb174;
+  border-color: #2fb174;
+}
+
+.export-btn.pdf {
+  background: rgba(231, 76, 60, 0.1);
+  color: #e74c3c;
+  border-color: #e74c3c;
+}
+
 .save-btn-top {
   background: #2fb174;
   color: #08100c;
