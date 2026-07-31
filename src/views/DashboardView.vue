@@ -397,8 +397,8 @@ const cancelEditSet = () => {
                 </div>
               </button>
               <div class="history-actions">
-                <button v-if="editingSessionId !== session.id" class="edit-session-btn" @click="handleEditSession(session)">✎</button>
-                <button class="delete-session-btn" @click="handleDeleteSession(session.id)">🗑</button>
+                <button v-if="editingSessionId !== session.id" class="edit-session-btn" @click="handleEditSession(session)">✎ Edit</button>
+                <button class="delete-session-btn" @click="handleDeleteSession(session.id)">🗑 Delete</button>
               </div>
             </div>
             <div v-if="expandedSessionIds.includes(session.id)" class="history-detail">
@@ -928,17 +928,28 @@ input, select {
 .delete-set-btn {
   position: absolute;
   right: 0.3rem;
-  background: none;
+  background: rgba(255, 68, 68, 0.15);
   border: none;
+  border-radius: 4px;
   color: #ff4444;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  opacity: 0.4;
-  transition: opacity 0.2s;
+  opacity: 0;
+  transition: all 0.2s ease;
 }
 
 .set-chip:hover .delete-set-btn {
   opacity: 1;
+}
+
+.delete-set-btn:hover {
+  background: rgba(255, 68, 68, 0.3);
+  transform: scale(1.1);
 }
 
 .set-chip small {
@@ -986,17 +997,24 @@ input, select {
 }
 
 .delete-session-btn {
-  background: none;
-  border: none;
+  background: rgba(255, 68, 68, 0.1);
+  border: 1px solid rgba(255, 68, 68, 0.2);
   color: #ff4444;
+  border-radius: 8px;
   cursor: pointer;
-  padding: 0.5rem;
-  opacity: 0.6;
-  transition: opacity 0.2s;
+  padding: 0.4rem 0.6rem;
+  font-weight: 600;
+  font-size: 0.8rem;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
 }
 
 .delete-session-btn:hover {
-  opacity: 1;
+  background: rgba(255, 68, 68, 0.2);
+  border-color: rgba(255, 68, 68, 0.4);
+  transform: scale(1.05);
 }
 
 .history-main {
