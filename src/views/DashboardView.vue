@@ -54,11 +54,6 @@ onMounted(() => {
   workoutStore.fetchSessions();
 });
 
-const activeSplitExercises = computed(() => {
-  if (!workoutStore.currentSession) return [];
-  return workoutStore.currentSession.exercises;
-});
-
 interface GroupedExercises {
   muscleGroup: string;
   exercises: Exercise[];
@@ -112,30 +107,85 @@ const groupedSetsByExercise = (session: WorkoutSession): GroupedExerciseEntries[
   }));
 };
 
-const selectedMuscleFilter = ref<string>('ALL');
+const expandedMuscleGroups = ref<string[]>([]);
+const historyExpandedMuscleGroups = ref<{ [sessionId: number]: string[] }>({});
 
-const activeMuscleGroups = computed(() => {
-  if (!workoutStore.currentSession) return [];
-  const map = new Map<string, number>();
-  for (const ex of workoutStore.currentSession.exercises) {
-    const group = ex.muscleGroup?.trim() || 'Other';
-    map.set(group, (map.get(group) || 0) + 1);
+const isMuscleGroupExpanded = (groupName: string) => {
+  return expandedMuscleGroups.value.includes(groupName);
+};
+
+const toggleMuscleGroup = (groupName: string) => {
+  if (expandedMuscleGroups.value.includes(groupName)) {
+    expandedMuscleGroups.value = expandedMuscleGroups.value.filter(g => g !== groupName);
+  } else {
+    expandedMuscleGroups.value.push(groupName);
   }
-  return Array.from(map.entries()).map(([name, count]) => ({ name, count }));
+};
+
+const expandAllMuscleGroups = () => {
+  if (!workoutStore.currentSession) return;
+  const groups = groupedSetsByExercise(workoutStore.currentSession).map(g => g.muscleGroup);
+  expandedMuscleGroups.value = groups;
+};
+
+const collapseAllMuscleGroups = () => {
+  expandedMuscleGroups.value = [];
+};
+
+const areAllMuscleGroupsExpanded = computed(() => {
+  if (!workoutStore.currentSession) return false;
+  const groups = groupedSetsByExercise(workoutStore.currentSession).map(g => g.muscleGroup);
+  return groups.length > 0 && groups.every(g => expandedMuscleGroups.value.includes(g));
 });
 
-const filteredGroupedSets = computed(() => {
-  if (!workoutStore.currentSession) return [];
-  const allGroups = groupedSetsByExercise(workoutStore.currentSession);
-  if (selectedMuscleFilter.value === 'ALL') {
-    return allGroups;
+const toggleAllMuscleGroups = () => {
+  if (areAllMuscleGroupsExpanded.value) {
+    collapseAllMuscleGroups();
+  } else {
+    expandAllMuscleGroups();
   }
-  return allGroups.filter(g => g.muscleGroup === selectedMuscleFilter.value);
-});
+};
+
+const ensureMuscleGroupExpanded = (exerciseId: number) => {
+  if (!workoutStore.currentSession) return;
+  const exercise = workoutStore.currentSession.exercises.find(e => e.id === exerciseId);
+  if (exercise) {
+    const groupName = exercise.muscleGroup?.trim() || 'Other';
+    if (!expandedMuscleGroups.value.includes(groupName)) {
+      expandedMuscleGroups.value.push(groupName);
+    }
+  }
+};
+
+const toggleHistoryMuscleGroup = (sessionId: number, groupName: string) => {
+  if (!historyExpandedMuscleGroups.value[sessionId]) {
+    historyExpandedMuscleGroups.value[sessionId] = [];
+  }
+  const current = historyExpandedMuscleGroups.value[sessionId];
+  if (current.includes(groupName)) {
+    historyExpandedMuscleGroups.value[sessionId] = current.filter(g => g !== groupName);
+  } else {
+    historyExpandedMuscleGroups.value[sessionId] = [...current, groupName];
+  }
+};
+
+const isHistoryMuscleGroupExpanded = (sessionId: number, groupName: string) => {
+  const list = historyExpandedMuscleGroups.value[sessionId];
+  return list ? list.includes(groupName) : true;
+};
 
 watch(() => workoutStore.currentSession?.id, () => {
-  selectedMuscleFilter.value = 'ALL';
-});
+  if (!workoutStore.currentSession) {
+    expandedMuscleGroups.value = [];
+    return;
+  }
+  const groups = groupedSetsByExercise(workoutStore.currentSession).map(g => g.muscleGroup);
+  if (groups.length <= 3) {
+    expandedMuscleGroups.value = [...groups];
+  } else {
+    expandedMuscleGroups.value = groups.length > 0 ? [groups[0]] : [];
+  }
+}, { immediate: true });
 
 const selectedSplit = computed(() => {
   if (selectedSplitId.value === null) return null;
@@ -159,6 +209,7 @@ const toggleSession = (sessionId: number) => {
 
 const handleAddSet = async () => {
   if (selectedExerciseId.value && weight.value !== null && reps.value !== null) {
+    ensureMuscleGroupExpanded(selectedExerciseId.value);
     await workoutStore.addSet(weight.value, reps.value, selectedExerciseId.value);
     weight.value = null;
     reps.value = null;
@@ -191,6 +242,7 @@ const handleSaveSession = async () => {
 };
 
 const quickAddSet = (sessionId: number, exerciseId: number) => {
+  ensureMuscleGroupExpanded(exerciseId);
   if (workoutStore.currentSession && sessionId === workoutStore.currentSession.id) {
     selectedExerciseId.value = exerciseId;
     weight.value = null;
@@ -392,40 +444,40 @@ const cancelEditSet = () => {
         </div>
 
         <div class="exercise-log">
-          <!-- Muscle Group Quick Filter Chips -->
-          <div class="muscle-group-filter" v-if="activeMuscleGroups.length > 1">
+          <div class="log-controls-bar">
+            <span class="log-heading-label">Exercises By Muscle Group</span>
             <button
-              class="filter-chip"
-              :class="{ active: selectedMuscleFilter === 'ALL' }"
-              @click="selectedMuscleFilter = 'ALL'"
+              type="button"
+              class="toggle-all-groups-btn"
+              @click="toggleAllMuscleGroups"
             >
-              All ({{ activeSplitExercises.length }})
-            </button>
-            <button
-              v-for="mg in activeMuscleGroups"
-              :key="mg.name"
-              class="filter-chip"
-              :class="{ active: selectedMuscleFilter === mg.name }"
-              @click="selectedMuscleFilter = mg.name"
-            >
-              {{ mg.name }} ({{ mg.count }})
+              {{ areAllMuscleGroupsExpanded ? 'Collapse All' : 'Expand All' }}
             </button>
           </div>
 
           <div
-            v-for="group in filteredGroupedSets"
+            v-for="group in groupedSetsByExercise(workoutStore.currentSession)"
             :key="group.muscleGroup"
             class="muscle-group-section"
+            :class="{ open: isMuscleGroupExpanded(group.muscleGroup) }"
           >
-            <div class="muscle-group-header">
+            <button
+              type="button"
+              class="muscle-group-header-btn"
+              @click="toggleMuscleGroup(group.muscleGroup)"
+              :aria-expanded="isMuscleGroupExpanded(group.muscleGroup)"
+            >
               <div class="muscle-group-heading">
                 <span class="muscle-group-indicator"></span>
                 <h4 class="muscle-group-title">{{ group.muscleGroup }}</h4>
               </div>
-              <span class="muscle-group-count">{{ group.entries.length }} {{ group.entries.length === 1 ? 'exercise' : 'exercises' }}</span>
-            </div>
+              <div class="muscle-group-meta">
+                <span class="muscle-group-count">{{ group.entries.length }} {{ group.entries.length === 1 ? 'exercise' : 'exercises' }}</span>
+                <span class="dropdown-chevron" :class="{ open: isMuscleGroupExpanded(group.muscleGroup) }">▼</span>
+              </div>
+            </button>
 
-            <div class="muscle-group-exercises">
+            <div v-if="isMuscleGroupExpanded(group.muscleGroup)" class="muscle-group-exercises">
               <div v-for="entry in group.entries" :key="entry.exercise.id" class="exercise-row">
                 <div class="exercise-info">
                   <strong>{{ entry.exercise.exerciseName }}</strong>
@@ -525,16 +577,25 @@ const cancelEditSet = () => {
                 v-for="group in groupedSetsByExercise(session)"
                 :key="group.muscleGroup"
                 class="muscle-group-section"
+                :class="{ open: isHistoryMuscleGroupExpanded(session.id, group.muscleGroup) }"
               >
-                <div class="muscle-group-header">
+                <button
+                  type="button"
+                  class="muscle-group-header-btn"
+                  @click="toggleHistoryMuscleGroup(session.id, group.muscleGroup)"
+                  :aria-expanded="isHistoryMuscleGroupExpanded(session.id, group.muscleGroup)"
+                >
                   <div class="muscle-group-heading">
                     <span class="muscle-group-indicator"></span>
                     <h4 class="muscle-group-title">{{ group.muscleGroup }}</h4>
                   </div>
-                  <span class="muscle-group-count">{{ group.entries.length }} {{ group.entries.length === 1 ? 'exercise' : 'exercises' }}</span>
-                </div>
+                  <div class="muscle-group-meta">
+                    <span class="muscle-group-count">{{ group.entries.length }} {{ group.entries.length === 1 ? 'exercise' : 'exercises' }}</span>
+                    <span class="dropdown-chevron" :class="{ open: isHistoryMuscleGroupExpanded(session.id, group.muscleGroup) }">▼</span>
+                  </div>
+                </button>
 
-                <div class="muscle-group-exercises">
+                <div v-if="isHistoryMuscleGroupExpanded(session.id, group.muscleGroup)" class="muscle-group-exercises">
                   <div v-for="entry in group.entries" :key="entry.exercise.id" class="exercise-row">
                     <div class="exercise-info">
                       <strong>{{ entry.exercise.exerciseName }}</strong>
@@ -989,44 +1050,38 @@ input, select {
   color: #4a5c54;
 }
 
-/* Muscle Group Filter */
-.muscle-group-filter {
+.log-controls-bar {
   display: flex;
-  gap: 0.5rem;
-  overflow-x: auto;
-  padding-bottom: 0.25rem;
-  margin-bottom: 0.5rem;
-  scrollbar-width: thin;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 0.25rem 0.25rem;
 }
 
-.filter-chip {
-  background: #0d1210;
-  border: 1px solid #31433b;
+.log-heading-label {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1px;
   color: #9ba9a3;
-  padding: 0.35rem 0.75rem;
-  border-radius: 20px;
+}
+
+.toggle-all-groups-btn {
+  background: none;
+  border: none;
+  color: #2fb174;
   font-size: 0.75rem;
   font-weight: 700;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
   cursor: pointer;
-  white-space: nowrap;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
   transition: all 0.2s ease;
 }
 
-.filter-chip:hover {
-  border-color: #2fb174;
-  color: #c9d8d0;
-  background: #16221d;
+.toggle-all-groups-btn:hover {
+  background: rgba(47, 177, 116, 0.1);
 }
 
-.filter-chip.active {
-  background: rgba(47, 177, 116, 0.15);
-  border-color: #2fb174;
-  color: #2fb174;
-}
-
-/* Muscle Group Section */
+/* Muscle Group Dropdown Section */
 .muscle-group-section {
   display: flex;
   flex-direction: column;
@@ -1034,49 +1089,88 @@ input, select {
 }
 
 .muscle-group-section:not(:first-child) {
-  margin-top: 0.75rem;
+  margin-top: 0.5rem;
 }
 
-.muscle-group-header {
+.muscle-group-header-btn {
+  width: 100%;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.25rem 0.25rem 0.35rem;
-  border-bottom: 1px solid rgba(49, 67, 59, 0.5);
+  padding: 0.75rem 1rem;
+  background: #111a16;
+  border: 1px solid #26352f;
+  border-radius: 12px;
+  cursor: pointer;
+  color: white;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.muscle-group-header-btn:hover {
+  background: #16241e;
+  border-color: #2fb174;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.muscle-group-section.open .muscle-group-header-btn {
+  border-color: rgba(47, 177, 116, 0.5);
+  background: #14201a;
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
 }
 
 .muscle-group-heading {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
 }
 
 .muscle-group-indicator {
   width: 4px;
-  height: 14px;
+  height: 16px;
   background: #2fb174;
   border-radius: 2px;
 }
 
 .muscle-group-title {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   font-weight: 800;
   color: #2fb174;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
 
+.muscle-group-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .muscle-group-count {
   font-size: 0.75rem;
   color: #9ba9a3;
-  font-weight: 500;
+  font-weight: 600;
+}
+
+.dropdown-chevron {
+  font-size: 0.7rem;
+  color: #2fb174;
+  transition: transform 0.25s ease;
+  display: inline-block;
+  transform: rotate(-90deg);
+}
+
+.dropdown-chevron.open {
+  transform: rotate(0deg);
 }
 
 .muscle-group-exercises {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  animation: fadeIn 0.2s ease;
 }
 
 optgroup {

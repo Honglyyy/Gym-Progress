@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { useUserStore } from '../stores/user';
 
+const router = useRouter();
 const userStore = useUserStore();
 const weightBefore = ref<number | null>(null);
 const weightAfter = ref<number | null>(null);
+
+const currentPin = ref('');
+const newPin = ref('');
+const confirmPin = ref('');
+const pinMessage = ref('');
+const pinMessageType = ref<'success' | 'error'>('success');
 
 onMounted(() => {
   userStore.fetchUsers();
@@ -16,6 +24,27 @@ const handleUpdateWeight = async () => {
     weightBefore.value = null;
     weightAfter.value = null;
   }
+};
+
+const handleUpdatePin = () => {
+  if (newPin.value !== confirmPin.value) {
+    pinMessage.value = 'New PIN and confirmation do not match.';
+    pinMessageType.value = 'error';
+    return;
+  }
+  const res = userStore.updatePin(currentPin.value, newPin.value);
+  pinMessage.value = res.message;
+  pinMessageType.value = res.success ? 'success' : 'error';
+  if (res.success) {
+    currentPin.value = '';
+    newPin.value = '';
+    confirmPin.value = '';
+  }
+};
+
+const handleLogout = () => {
+  userStore.logout();
+  router.push('/login');
 };
 
 const formatDate = (dateString: string) => {
@@ -56,31 +85,75 @@ const formatDate = (dateString: string) => {
     </section>
 
     <div class="profile-grid">
-      <section class="panel weight-update premium-panel">
-        <div class="panel-header">
-          <h2>Update Weight</h2>
-          <p class="subtitle">Track your progress today</p>
-        </div>
-        <div class="form-body">
-          <div class="input-grid">
-            <div class="input-group floating">
-              <input v-model.number="weightBefore" type="number" step="0.1" id="weight-before" required />
-              <label for="weight-before">Weight Before (kg)</label>
-            </div>
-            <div class="input-group floating">
-              <input v-model.number="weightAfter" type="number" step="0.1" id="weight-after" required />
-              <label for="weight-after">Weight After (kg)</label>
-            </div>
+      <div class="left-col">
+        <section class="panel weight-update premium-panel">
+          <div class="panel-header">
+            <h2>Update Weight</h2>
+            <p class="subtitle">Track your progress today</p>
           </div>
-          <button 
-            class="primary-action glowing-btn" 
-            @click="handleUpdateWeight"
-            :disabled="weightBefore === null || weightAfter === null"
-          >
-            Log Weight
-          </button>
-        </div>
-      </section>
+          <div class="form-body">
+            <div class="input-grid">
+              <div class="input-group floating">
+                <input v-model.number="weightBefore" type="number" step="0.1" id="weight-before" required />
+                <label for="weight-before">Weight Before (kg)</label>
+              </div>
+              <div class="input-group floating">
+                <input v-model.number="weightAfter" type="number" step="0.1" id="weight-after" required />
+                <label for="weight-after">Weight After (kg)</label>
+              </div>
+            </div>
+            <button 
+              class="primary-action glowing-btn" 
+              @click="handleUpdateWeight"
+              :disabled="weightBefore === null || weightAfter === null"
+            >
+              Log Weight
+            </button>
+          </div>
+        </section>
+
+        <section class="panel security-panel premium-panel">
+          <div class="panel-header">
+            <h2>Security & PIN</h2>
+            <p class="subtitle">Internal access control</p>
+          </div>
+          <div class="form-body">
+            <div class="pin-status">
+              <span class="status-indicator"></span>
+              <span>4-Digit PIN Protection: Active</span>
+            </div>
+
+            <div class="input-grid">
+              <div class="input-group floating">
+                <input v-model="currentPin" type="password" maxlength="4" inputmode="numeric" id="current-pin" required />
+                <label for="current-pin">Current PIN</label>
+              </div>
+              <div class="input-group floating">
+                <input v-model="newPin" type="password" maxlength="4" inputmode="numeric" id="new-pin" required />
+                <label for="new-pin">New 4-Digit PIN</label>
+              </div>
+              <div class="input-group floating">
+                <input v-model="confirmPin" type="password" maxlength="4" inputmode="numeric" id="confirm-pin" required />
+                <label for="confirm-pin">Confirm New PIN</label>
+              </div>
+            </div>
+
+            <p v-if="pinMessage" :class="['pin-feedback', pinMessageType]">{{ pinMessage }}</p>
+
+            <button
+              class="primary-action change-pin-btn"
+              @click="handleUpdatePin"
+              :disabled="!currentPin || newPin.length !== 4 || confirmPin.length !== 4"
+            >
+              Change PIN
+            </button>
+
+            <button class="logout-full-btn" @click="handleLogout">
+              🔒 Lock App & Log Out
+            </button>
+          </div>
+        </section>
+      </div>
 
       <section class="panel history-panel premium-panel">
         <div class="panel-header">
@@ -485,6 +558,66 @@ const formatDate = (dateString: string) => {
   border-top-color: #2fb174;
   border-radius: 50%;
   animation: spin 1s linear infinite;
+}
+
+.left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.pin-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #9ba9a3;
+  font-weight: 600;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  background: #2fb174;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #2fb174;
+}
+
+.pin-feedback {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.pin-feedback.success {
+  color: #2fb174;
+}
+
+.pin-feedback.error {
+  color: #ff5252;
+}
+
+.change-pin-btn {
+  padding: 1rem;
+}
+
+.logout-full-btn {
+  background: rgba(255, 68, 68, 0.1);
+  border: 1px solid rgba(255, 68, 68, 0.25);
+  color: #ff6b6b;
+  font-weight: 700;
+  padding: 0.85rem;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.logout-full-btn:hover {
+  background: rgba(255, 68, 68, 0.2);
+  border-color: #ff6b6b;
+  color: white;
 }
 
 @media (max-width: 900px) {

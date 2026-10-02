@@ -5,6 +5,11 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/LoginView.vue'),
+    },
+    {
       path: '/',
       name: 'dashboard',
       component: DashboardView,
@@ -25,6 +30,17 @@ const router = createRouter({
       component: () => import('../views/ProfileView.vue'),
     },
   ],
+});
+
+router.beforeEach((to, _from, next) => {
+  const isLoggedIn = localStorage.getItem('gym_auth_logged_in') === 'true';
+  if (to.name !== 'login' && !isLoggedIn) {
+    next({ name: 'login' });
+  } else if (to.name === 'login' && isLoggedIn) {
+    next({ name: 'dashboard' });
+  } else {
+    next();
+  }
 });
 
 export default router;
