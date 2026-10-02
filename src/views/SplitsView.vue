@@ -1,10 +1,25 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useSplitStore } from '../stores/split';
 import { useExerciseStore } from '../stores/exercise';
 
 const splitStore = useSplitStore();
 const exerciseStore = useExerciseStore();
+
+const groupedLibraryExercises = computed(() => {
+  const map = new Map<string, typeof exerciseStore.exercises>();
+  for (const ex of exerciseStore.exercises) {
+    const group = ex.muscleGroup?.trim() || 'Other';
+    if (!map.has(group)) {
+      map.set(group, []);
+    }
+    map.get(group)!.push(ex);
+  }
+  return Array.from(map.entries()).map(([muscleGroup, exercises]) => ({
+    muscleGroup,
+    exercises,
+  }));
+});
 
 const newSplitName = ref('');
 const sessions = ref<{ sessionName: string; exerciseIds: number[] }[]>([
@@ -141,13 +156,18 @@ const handleAddSplit = async () => {
                   <p class="picker-label">Select Exercises:</p>
                   <button class="inline-add-btn" @click="openExerciseModal(index)">+ New Exercise</button>
                 </div>
-                <div class="exercise-grid">
-                  <div v-for="ex in exerciseStore.exercises" :key="ex.id" class="exercise-chip-wrapper">
-                    <label class="exercise-chip" :class="{ selected: session.exerciseIds.includes(ex.id) }">
-                      <input type="checkbox" :value="ex.id" v-model="session.exerciseIds" />
-                      <span>{{ ex.exerciseName }}</span>
-                    </label>
-                    <button class="edit-ex-btn" @click.stop="openExerciseModal(null, ex)">✎</button>
+                <div class="picker-groups">
+                  <div v-for="group in groupedLibraryExercises" :key="group.muscleGroup" class="picker-muscle-group">
+                    <span class="picker-group-title">{{ group.muscleGroup }}</span>
+                    <div class="exercise-grid">
+                      <div v-for="ex in group.exercises" :key="ex.id" class="exercise-chip-wrapper">
+                        <label class="exercise-chip" :class="{ selected: session.exerciseIds.includes(ex.id) }">
+                          <input type="checkbox" :value="ex.id" v-model="session.exerciseIds" />
+                          <span>{{ ex.exerciseName }}</span>
+                        </label>
+                        <button class="edit-ex-btn" @click.stop="openExerciseModal(null, ex)">✎</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -389,6 +409,30 @@ input:focus, select:focus {
   font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.picker-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.picker-muscle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: rgba(255, 255, 255, 0.015);
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(49, 67, 59, 0.4);
+}
+
+.picker-group-title {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #2fb174;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .exercise-grid {

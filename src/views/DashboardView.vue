@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useUserStore } from '../stores/user';
 import { useSplitStore } from '../stores/split';
 import { useWorkoutStore } from '../stores/workout';
-import type { WorkoutSession } from '../types';
+import type { WorkoutSession, Exercise, WorkoutSet } from '../types';
 import { exportToExcel, exportToPDF, filterSessions } from '../utils/exportUtils';
 
 const userStore = useUserStore();
@@ -59,6 +59,84 @@ const activeSplitExercises = computed(() => {
   return workoutStore.currentSession.exercises;
 });
 
+interface GroupedExercises {
+  muscleGroup: string;
+  exercises: Exercise[];
+}
+
+interface ExerciseEntry {
+  exercise: Exercise;
+  sets: WorkoutSet[];
+}
+
+interface GroupedExerciseEntries {
+  muscleGroup: string;
+  entries: ExerciseEntry[];
+}
+
+const groupExercisesByMuscle = (exercises: Exercise[]): GroupedExercises[] => {
+  const map = new Map<string, Exercise[]>();
+  for (const ex of exercises) {
+    const group = ex.muscleGroup?.trim() || 'Other';
+    if (!map.has(group)) {
+      map.set(group, []);
+    }
+    map.get(group)!.push(ex);
+  }
+  return Array.from(map.entries()).map(([muscleGroup, exercises]) => ({
+    muscleGroup,
+    exercises,
+  }));
+};
+
+const groupedActiveSplitExercises = computed(() => {
+  if (!workoutStore.currentSession) return [];
+  return groupExercisesByMuscle(workoutStore.currentSession.exercises);
+});
+
+const groupedSetsByExercise = (session: WorkoutSession): GroupedExerciseEntries[] => {
+  const map = new Map<string, ExerciseEntry[]>();
+  for (const exercise of session.exercises) {
+    const group = exercise.muscleGroup?.trim() || 'Other';
+    if (!map.has(group)) {
+      map.set(group, []);
+    }
+    map.get(group)!.push({
+      exercise,
+      sets: session.workoutSets.filter(set => set.exerciseId === exercise.id),
+    });
+  }
+  return Array.from(map.entries()).map(([muscleGroup, entries]) => ({
+    muscleGroup,
+    entries,
+  }));
+};
+
+const selectedMuscleFilter = ref<string>('ALL');
+
+const activeMuscleGroups = computed(() => {
+  if (!workoutStore.currentSession) return [];
+  const map = new Map<string, number>();
+  for (const ex of workoutStore.currentSession.exercises) {
+    const group = ex.muscleGroup?.trim() || 'Other';
+    map.set(group, (map.get(group) || 0) + 1);
+  }
+  return Array.from(map.entries()).map(([name, count]) => ({ name, count }));
+});
+
+const filteredGroupedSets = computed(() => {
+  if (!workoutStore.currentSession) return [];
+  const allGroups = groupedSetsByExercise(workoutStore.currentSession);
+  if (selectedMuscleFilter.value === 'ALL') {
+    return allGroups;
+  }
+  return allGroups.filter(g => g.muscleGroup === selectedMuscleFilter.value);
+});
+
+watch(() => workoutStore.currentSession?.id, () => {
+  selectedMuscleFilter.value = 'ALL';
+});
+
 const selectedSplit = computed(() => {
   if (selectedSplitId.value === null) return null;
   return splitStore.splits.find(split => split.id === selectedSplitId.value) ?? null;
@@ -71,13 +149,6 @@ const selectSplit = (splitId: number) => {
 
 const selectSession = (session: any) => {
   selectedSession.value = session;
-};
-
-const setsByExercise = (session: WorkoutSession) => {
-  return session.exercises.map(exercise => ({
-    exercise,
-    sets: session.workoutSets.filter(set => set.exerciseId === exercise.id),
-  }));
 };
 
 const toggleSession = (sessionId: number) => {
@@ -291,9 +362,15 @@ const cancelEditSet = () => {
               <label>Exercise</label>
               <select v-model.number="selectedExerciseId">
                 <option :value="null" disabled>Select exercise</option>
-                <option v-for="ex in activeSplitExercises" :key="ex.id" :value="ex.id">
-                  {{ ex.exerciseName }}
-                </option>
+                <optgroup
+                  v-for="group in groupedActiveSplitExercises"
+                  :key="group.muscleGroup"
+                  :label="group.muscleGroup"
+                >
+                  <option v-for="ex in group.exercises" :key="ex.id" :value="ex.id">
+                    {{ ex.exerciseName }}
+                  </option>
+                </optgroup>
               </select>
             </div>
             <div class="input-group">
@@ -315,40 +392,82 @@ const cancelEditSet = () => {
         </div>
 
         <div class="exercise-log">
-          <div v-for="entry in setsByExercise(workoutStore.currentSession)" :key="entry.exercise.id" class="exercise-row">
-            <div class="exercise-info">
-              <strong>{{ entry.exercise.exerciseName }}</strong>
-              <div class="exercise-info-right">
-                <button v-if="entry.sets.length === 0" class="quick-add-btn" @click="quickAddSet(workoutStore.currentSession!.id, entry.exercise.id)">+ Add Set</button>
-                <span>{{ entry.exercise.muscleGroup || 'No group' }}</span>
+          <!-- Muscle Group Quick Filter Chips -->
+          <div class="muscle-group-filter" v-if="activeMuscleGroups.length > 1">
+            <button
+              class="filter-chip"
+              :class="{ active: selectedMuscleFilter === 'ALL' }"
+              @click="selectedMuscleFilter = 'ALL'"
+            >
+              All ({{ activeSplitExercises.length }})
+            </button>
+            <button
+              v-for="mg in activeMuscleGroups"
+              :key="mg.name"
+              class="filter-chip"
+              :class="{ active: selectedMuscleFilter === mg.name }"
+              @click="selectedMuscleFilter = mg.name"
+            >
+              {{ mg.name }} ({{ mg.count }})
+            </button>
+          </div>
+
+          <div
+            v-for="group in filteredGroupedSets"
+            :key="group.muscleGroup"
+            class="muscle-group-section"
+          >
+            <div class="muscle-group-header">
+              <div class="muscle-group-heading">
+                <span class="muscle-group-indicator"></span>
+                <h4 class="muscle-group-title">{{ group.muscleGroup }}</h4>
               </div>
+              <span class="muscle-group-count">{{ group.entries.length }} {{ group.entries.length === 1 ? 'exercise' : 'exercises' }}</span>
             </div>
-            <div class="set-chips">
-              <div v-if="addingSetToExercise?.sessionId === workoutStore.currentSession!.id && addingSetToExercise?.exerciseId === entry.exercise.id" class="set-edit-form inline-add">
-                <input v-model.number="weight" type="number" step="0.5" placeholder="kg" />
-                <span>x</span>
-                <input v-model.number="reps" type="number" placeholder="reps" />
-                <button @click="handleAddSetInline(workoutStore.currentSession!.id, entry.exercise.id)" class="save-set">✓</button>
-                <button @click="addingSetToExercise = null" class="cancel-set">×</button>
-              </div>
-              <span v-else-if="entry.sets.length === 0" class="no-sets">No sets logged</span>
-              <div v-for="(set, index) in entry.sets" :key="set.id" class="set-chip-container">
-                <div v-if="editingSetId === set.id" class="set-edit-form expanded">
-                  <select v-model="editingExerciseId" class="edit-set-exercise">
-                    <option v-for="ex in activeSplitExercises" :key="ex.id" :value="ex.id">{{ ex.exerciseName }}</option>
-                  </select>
-                  <div class="edit-inputs">
-                    <input v-model.number="editingWeight" type="number" step="0.5" />
-                    <span>x</span>
-                    <input v-model.number="editingReps" type="number" />
-                    <button @click="handleUpdateSet(workoutStore.currentSession!.id)" class="save-set">✓</button>
-                    <button @click="cancelEditSet" class="cancel-set">×</button>
+
+            <div class="muscle-group-exercises">
+              <div v-for="entry in group.entries" :key="entry.exercise.id" class="exercise-row">
+                <div class="exercise-info">
+                  <strong>{{ entry.exercise.exerciseName }}</strong>
+                  <div class="exercise-info-right">
+                    <button class="quick-add-btn" @click="quickAddSet(workoutStore.currentSession!.id, entry.exercise.id)">+ Add Set</button>
+                    <span>{{ entry.exercise.muscleGroup || 'No group' }}</span>
                   </div>
                 </div>
-                <div v-else class="set-chip" @click="handleEditSet(set)">
-                  <small>{{ index + 1 }}</small>
-                  {{ set.weight }}<small>kg</small> x {{ set.reps }}
-                  <button class="delete-set-btn" @click.stop="handleDeleteSet(set.id, workoutStore.currentSession!.id)">×</button>
+                <div class="set-chips">
+                  <div v-if="addingSetToExercise?.sessionId === workoutStore.currentSession!.id && addingSetToExercise?.exerciseId === entry.exercise.id" class="set-edit-form inline-add">
+                    <input v-model.number="weight" type="number" step="0.5" placeholder="kg" />
+                    <span>x</span>
+                    <input v-model.number="reps" type="number" placeholder="reps" />
+                    <button @click="handleAddSetInline(workoutStore.currentSession!.id, entry.exercise.id)" class="save-set">✓</button>
+                    <button @click="addingSetToExercise = null" class="cancel-set">×</button>
+                  </div>
+                  <span v-else-if="entry.sets.length === 0" class="no-sets">No sets logged</span>
+                  <div v-for="(set, index) in entry.sets" :key="set.id" class="set-chip-container">
+                    <div v-if="editingSetId === set.id" class="set-edit-form expanded">
+                      <select v-model="editingExerciseId" class="edit-set-exercise">
+                        <optgroup
+                          v-for="g in groupedActiveSplitExercises"
+                          :key="g.muscleGroup"
+                          :label="g.muscleGroup"
+                        >
+                          <option v-for="ex in g.exercises" :key="ex.id" :value="ex.id">{{ ex.exerciseName }}</option>
+                        </optgroup>
+                      </select>
+                      <div class="edit-inputs">
+                        <input v-model.number="editingWeight" type="number" step="0.5" />
+                        <span>x</span>
+                        <input v-model.number="editingReps" type="number" />
+                        <button @click="handleUpdateSet(workoutStore.currentSession!.id)" class="save-set">✓</button>
+                        <button @click="cancelEditSet" class="cancel-set">×</button>
+                      </div>
+                    </div>
+                    <div v-else class="set-chip" @click="handleEditSet(set)">
+                      <small>{{ index + 1 }}</small>
+                      {{ set.weight }}<small>kg</small> x {{ set.reps }}
+                      <button class="delete-set-btn" @click.stop="handleDeleteSet(set.id, workoutStore.currentSession!.id)">×</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -402,39 +521,61 @@ const cancelEditSet = () => {
               </div>
             </div>
             <div v-if="expandedSessionIds.includes(session.id)" class="history-detail">
-              <div v-for="entry in setsByExercise(session)" :key="entry.exercise.id" class="exercise-row">
-                <div class="exercise-info">
-                  <strong>{{ entry.exercise.exerciseName }}</strong>
-                  <div class="exercise-info-right">
-                    <button v-if="entry.sets.length === 0" class="quick-add-btn" @click="quickAddSet(session.id, entry.exercise.id)">+ Add Set</button>
-                    <span>{{ entry.exercise.muscleGroup || 'No group' }}</span>
+              <div
+                v-for="group in groupedSetsByExercise(session)"
+                :key="group.muscleGroup"
+                class="muscle-group-section"
+              >
+                <div class="muscle-group-header">
+                  <div class="muscle-group-heading">
+                    <span class="muscle-group-indicator"></span>
+                    <h4 class="muscle-group-title">{{ group.muscleGroup }}</h4>
                   </div>
+                  <span class="muscle-group-count">{{ group.entries.length }} {{ group.entries.length === 1 ? 'exercise' : 'exercises' }}</span>
                 </div>
-                <div class="set-chips">
-                  <div v-if="addingSetToExercise?.sessionId === session.id && addingSetToExercise?.exerciseId === entry.exercise.id" class="set-edit-form inline-add">
-                    <input v-model.number="weight" type="number" step="0.5" placeholder="kg" />
-                    <span>x</span>
-                    <input v-model.number="reps" type="number" placeholder="reps" />
-                    <button @click="handleAddSetInline(session.id, entry.exercise.id)" class="save-set">✓</button>
-                    <button @click="addingSetToExercise = null" class="cancel-set">×</button>
-                  </div>
-                  <span v-else-if="entry.sets.length === 0">No sets logged</span>
-                  <div v-for="set in entry.sets" :key="set.id" class="set-chip-container">
-                    <div v-if="editingSetId === set.id" class="set-edit-form expanded">
-                      <select v-model="editingExerciseId" class="edit-set-exercise">
-                        <option v-for="ex in session.exercises" :key="ex.id" :value="ex.id">{{ ex.exerciseName }}</option>
-                      </select>
-                      <div class="edit-inputs">
-                        <input v-model.number="editingWeight" type="number" step="0.5" />
-                        <span>x</span>
-                        <input v-model.number="editingReps" type="number" />
-                        <button @click="handleUpdateSet(session.id)" class="save-set">✓</button>
-                        <button @click="cancelEditSet" class="cancel-set">×</button>
+
+                <div class="muscle-group-exercises">
+                  <div v-for="entry in group.entries" :key="entry.exercise.id" class="exercise-row">
+                    <div class="exercise-info">
+                      <strong>{{ entry.exercise.exerciseName }}</strong>
+                      <div class="exercise-info-right">
+                        <button class="quick-add-btn" @click="quickAddSet(session.id, entry.exercise.id)">+ Add Set</button>
+                        <span>{{ entry.exercise.muscleGroup || 'No group' }}</span>
                       </div>
                     </div>
-                    <div v-else class="set-chip" @click="handleEditSet(set)">
-                      {{ set.weight }}kg x {{ set.reps }}
-                      <button class="delete-set-btn" @click.stop="handleDeleteSet(set.id, session.id)">×</button>
+                    <div class="set-chips">
+                      <div v-if="addingSetToExercise?.sessionId === session.id && addingSetToExercise?.exerciseId === entry.exercise.id" class="set-edit-form inline-add">
+                        <input v-model.number="weight" type="number" step="0.5" placeholder="kg" />
+                        <span>x</span>
+                        <input v-model.number="reps" type="number" placeholder="reps" />
+                        <button @click="handleAddSetInline(session.id, entry.exercise.id)" class="save-set">✓</button>
+                        <button @click="addingSetToExercise = null" class="cancel-set">×</button>
+                      </div>
+                      <span v-else-if="entry.sets.length === 0">No sets logged</span>
+                      <div v-for="set in entry.sets" :key="set.id" class="set-chip-container">
+                        <div v-if="editingSetId === set.id" class="set-edit-form expanded">
+                          <select v-model="editingExerciseId" class="edit-set-exercise">
+                            <optgroup
+                              v-for="g in groupExercisesByMuscle(session.exercises)"
+                              :key="g.muscleGroup"
+                              :label="g.muscleGroup"
+                            >
+                              <option v-for="ex in g.exercises" :key="ex.id" :value="ex.id">{{ ex.exerciseName }}</option>
+                            </optgroup>
+                          </select>
+                          <div class="edit-inputs">
+                            <input v-model.number="editingWeight" type="number" step="0.5" />
+                            <span>x</span>
+                            <input v-model.number="editingReps" type="number" />
+                            <button @click="handleUpdateSet(session.id)" class="save-set">✓</button>
+                            <button @click="cancelEditSet" class="cancel-set">×</button>
+                          </div>
+                        </div>
+                        <div v-else class="set-chip" @click="handleEditSet(set)">
+                          {{ set.weight }}kg x {{ set.reps }}
+                          <button class="delete-set-btn" @click.stop="handleDeleteSet(set.id, session.id)">×</button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -522,6 +663,12 @@ const cancelEditSet = () => {
   font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.quick-add-btn:hover {
+  background: rgba(47, 177, 116, 0.25);
+  border-style: solid;
 }
 
 .set-edit-form.expanded {
@@ -842,10 +989,112 @@ input, select {
   color: #4a5c54;
 }
 
+/* Muscle Group Filter */
+.muscle-group-filter {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  margin-bottom: 0.5rem;
+  scrollbar-width: thin;
+}
+
+.filter-chip {
+  background: #0d1210;
+  border: 1px solid #31433b;
+  color: #9ba9a3;
+  padding: 0.35rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.filter-chip:hover {
+  border-color: #2fb174;
+  color: #c9d8d0;
+  background: #16221d;
+}
+
+.filter-chip.active {
+  background: rgba(47, 177, 116, 0.15);
+  border-color: #2fb174;
+  color: #2fb174;
+}
+
+/* Muscle Group Section */
+.muscle-group-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.muscle-group-section:not(:first-child) {
+  margin-top: 0.75rem;
+}
+
+.muscle-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0.25rem 0.35rem;
+  border-bottom: 1px solid rgba(49, 67, 59, 0.5);
+}
+
+.muscle-group-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.muscle-group-indicator {
+  width: 4px;
+  height: 14px;
+  background: #2fb174;
+  border-radius: 2px;
+}
+
+.muscle-group-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #2fb174;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.muscle-group-count {
+  font-size: 0.75rem;
+  color: #9ba9a3;
+  font-weight: 500;
+}
+
+.muscle-group-exercises {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+optgroup {
+  background: #121816;
+  color: #2fb174;
+  font-weight: 700;
+}
+
+optgroup option {
+  background: #0d1210;
+  color: white;
+  font-weight: normal;
+}
+
 .exercise-log {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.25rem;
 }
 
 .exercise-row {
